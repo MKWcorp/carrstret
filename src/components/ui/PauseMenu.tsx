@@ -1,9 +1,10 @@
 "use client";
 
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 export default function PauseMenu() {
-  const { setScreen, resetGame } = useGameStore();
+  const setScreen  = useGameStore((s) => s.setScreen);
+  const resetGame  = useGameStore((s) => s.resetGame);
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center select-none"

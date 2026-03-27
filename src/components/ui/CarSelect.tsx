@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 import { CAR_CONFIGS } from "@/lib/cars";
 import type { CarConfig } from "@/types/game";
 
 export default function CarSelect() {
-  const { selectedCar, selectCar, setScreen } = useGameStore();
+  const selectedCar = useGameStore((s) => s.selectedCar);
+  const selectCar   = useGameStore((s) => s.selectCar);
+  const setScreen   = useGameStore((s) => s.setScreen);
   const [hovered, setHovered] = useState<string | null>(null);
 
   const handleSelect = (car: CarConfig) => {

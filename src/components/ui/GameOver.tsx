@@ -1,6 +1,6 @@
 "use client";
 
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -10,7 +10,10 @@ function formatTime(seconds: number): string {
 }
 
 export default function GameOver() {
-  const { bestLapTime, selectedCar, resetGame, setScreen } = useGameStore();
+  const bestLapTime = useGameStore((s) => s.bestLapTime);
+  const selectedCar  = useGameStore((s) => s.selectedCar);
+  const resetGame    = useGameStore((s) => s.resetGame);
+  const setScreen    = useGameStore((s) => s.setScreen);
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center select-none"

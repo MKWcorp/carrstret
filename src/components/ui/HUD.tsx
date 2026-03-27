@@ -1,6 +1,6 @@
 "use client";
 
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -10,8 +10,13 @@ function formatTime(seconds: number): string {
 }
 
 export default function HUD() {
-  const { speed, lapTime, bestLapTime, currentLap, totalLaps, selectedCar, setScreen } =
-    useGameStore();
+  const speed       = useGameStore((s) => s.speed);
+  const lapTime     = useGameStore((s) => s.lapTime);
+  const bestLapTime = useGameStore((s) => s.bestLapTime);
+  const currentLap  = useGameStore((s) => s.currentLap);
+  const totalLaps   = useGameStore((s) => s.totalLaps);
+  const selectedCar = useGameStore((s) => s.selectedCar);
+  const setScreen   = useGameStore((s) => s.setScreen);
 
   const speedPercent = Math.min((speed / (selectedCar?.maxSpeed ?? 40)) * 100, 100);
 

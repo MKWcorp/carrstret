@@ -1,9 +1,9 @@
 "use client";
 
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 export default function MainMenu() {
-  const { setScreen } = useGameStore();
+  const setScreen = useGameStore((s) => s.setScreen);
 
   return (
     <div className="relative flex flex-col items-center justify-center w-full h-full min-h-screen bg-black overflow-hidden select-none">
@@ -18,79 +18,76 @@ export default function MainMenu() {
         }}
       />
 
-      {/* Glow overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black pointer-events-none" />
+      {/* Radial glow */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, rgba(0,255,136,0.08) 0%, transparent 70%)",
+        }}
+      />
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center gap-6 px-4 text-center">
+      <div className="relative z-10 flex flex-col items-center gap-8 px-6 text-center">
         {/* Logo */}
-        <div className="mb-4">
+        <div className="flex flex-col items-center gap-2">
           <h1
-            className="text-5xl sm:text-7xl font-black tracking-widest uppercase"
+            className="text-6xl sm:text-8xl font-black tracking-tighter text-white"
             style={{
-              color: "#00ff88",
-              textShadow: "0 0 30px #00ff88, 0 0 60px #00ff8844",
-              fontFamily: "system-ui, sans-serif",
+              textShadow: "0 0 40px rgba(0,255,136,0.6), 0 0 80px rgba(0,255,136,0.3)",
+              fontFamily: "'Arial Black', sans-serif",
             }}
           >
-            CARR
+            CARRSTRET
           </h1>
-          <h1
-            className="text-5xl sm:text-7xl font-black tracking-widest uppercase -mt-3"
-            style={{
-              color: "#ffffff",
-              textShadow: "0 0 20px #ffffff44",
-              fontFamily: "system-ui, sans-serif",
-            }}
-          >
-            STRET
-          </h1>
-          <p className="text-gray-400 text-sm sm:text-base mt-2 tracking-widest uppercase">
+          <p className="text-green-400/60 text-sm tracking-[0.4em] uppercase font-medium">
             Arcade Racing 3D
           </p>
         </div>
 
-        {/* Buttons */}
-        <div className="flex flex-col gap-4 w-full max-w-xs">
-          <button
-            onClick={() => setScreen("car-select")}
-            className="w-full py-4 px-8 text-black font-bold text-lg uppercase tracking-widest rounded-lg transition-all duration-200 active:scale-95"
-            style={{
-              background: "linear-gradient(135deg, #00ff88, #00cc66)",
-              boxShadow: "0 0 20px #00ff8866",
-            }}
-          >
-            ▶ MULAI BALAPAN
-          </button>
+        {/* Decorative car silhouette */}
+        <div className="text-8xl opacity-30 select-none" aria-hidden>🏎️</div>
 
-          <button
-            onClick={() => setScreen("car-select")}
-            className="w-full py-3 px-8 text-white font-semibold text-base uppercase tracking-wider rounded-lg border border-gray-600 bg-gray-900/80 hover:bg-gray-800 transition-all duration-200 active:scale-95"
-          >
-            🚗 PILIH MOBIL
-          </button>
-        </div>
+        {/* Play button */}
+        <button
+          onClick={() => setScreen("car-select")}
+          className="group relative px-12 py-4 text-black font-black text-xl tracking-widest uppercase rounded-full overflow-hidden transition-all duration-200 hover:scale-105 active:scale-95"
+          style={{
+            background: "linear-gradient(135deg, #00ff88, #00cc66)",
+            boxShadow: "0 0 30px rgba(0,255,136,0.5), 0 4px 20px rgba(0,0,0,0.4)",
+          }}
+        >
+          <span className="relative z-10">PLAY NOW</span>
+          <div
+            className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ background: "linear-gradient(135deg, #00ffaa, #00ee77)" }}
+          />
+        </button>
 
         {/* Controls hint */}
-        <div className="mt-6 text-gray-500 text-xs sm:text-sm space-y-1">
-          <p className="text-gray-400 font-semibold uppercase tracking-wider mb-2">Kontrol</p>
-          <div className="flex gap-6 justify-center flex-wrap">
-            <span>⬆ Maju</span>
-            <span>⬇ Mundur</span>
-            <span>⬅ ➡ Belok</span>
-            <span>SPACE Rem</span>
-            <span>R Reset</span>
+        <div className="flex flex-col items-center gap-3 mt-2">
+          <p className="text-white/30 text-xs uppercase tracking-widest">Controls</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {[
+              { key: "W / ↑", label: "Gas" },
+              { key: "S / ↓", label: "Reverse" },
+              { key: "A / ←", label: "Left" },
+              { key: "D / →", label: "Right" },
+              { key: "SPACE", label: "Brake" },
+              { key: "R", label: "Reset" },
+            ].map((c) => (
+              <div
+                key={c.key}
+                className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1"
+              >
+                <kbd className="text-green-400 text-xs font-mono font-bold">{c.key}</kbd>
+                <span className="text-white/40 text-xs">{c.label}</span>
+              </div>
+            ))}
           </div>
-          <p className="text-gray-600 mt-2">📱 HP: Gunakan tombol virtual di layar</p>
+          <p className="text-white/20 text-xs mt-1">📱 Mobile: Virtual D-pad tersedia</p>
         </div>
       </div>
-
-      <style jsx global>{`
-        @keyframes gridMove {
-          0% { background-position: 0 0; }
-          100% { background-position: 0 60px; }
-        }
-      `}</style>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useAudioManager } from "@/hooks/useAudioManager";
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore } from "@/store/useGameStore";
 
 export default function AudioController() {
   const audio = useAudioManager();

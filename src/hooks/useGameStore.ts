@@ -1,18 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { gameStore } from "@/store/gameStore";
-import type { GameState } from "@/types/game";
-
-export function useGameStore(): GameState & typeof gameStore {
-  const [state, setState] = useState<GameState>(gameStore.getState());
-
-  useEffect(() => {
-    const unsub = gameStore.subscribe(() => {
-      setState({ ...gameStore.getState() });
-    });
-    return unsub;
-  }, []);
-
-  return { ...state, ...gameStore };
-}
+/**
+ * Backward-compatible re-export.
+ * Semua komponen lama yang import dari @/store/useGameStore
+ * sekarang menggunakan Zustand store baru dari @/store/useGameStore.
+ */
+export { useGameStore } from "@/store/useGameStore";
