@@ -56,7 +56,7 @@ export default function ProGameScene({ controls, carConfig }: Props) {
         <Suspense fallback={null}>
           <Environment />
 
-          <Physics gravity={[0, -22, 0]} timeStep="vary">
+          <Physics gravity={[0, -9.81, 0]} timeStep={1 / 60}>
             <ProTrack />
             <ArcadeCar controls={controls} carConfig={carConfig} />
           </Physics>

@@ -1,14 +1,22 @@
 "use client";
 /**
- * ─── ArcadeCar v3 ──────────────────────────────────────────────────────────────
+ * ─── ArcadeCar v4 ──────────────────────────────────────────────────────────────
  *
- * Sistem fisika yang BENAR — tidak tembus track:
+ * FIX SPAWN TEMBUS TRACK:
  *
- *  - RigidBody type="kinematicPosition" + colliders="cuboid"
- *  - Posisi dihitung manual (arcade feel) tapi collision tetap aktif
- *  - Rapier KinematicCharacterController untuk resolusi collision
- *  - Gravity manual agar mobil selalu menempel ke permukaan
- *  - Spawn Y tinggi + gravity pull agar tidak jatuh ke bawah track
+ *  Masalah sebelumnya:
+ *  1. Spawn Y=2.5 terlalu tinggi → jatuh bebas sebelum physics ready
+ *  2. Raycast max distance 2.5m → tidak menjangkau track dari ketinggian spawn
+ *  3. Physics world butuh beberapa frame sebelum collider aktif
+ *
+ *  Solusi:
+ *  1. Spawn Y = TRACK_SURFACE_Y + CAR_HALF_HEIGHT + margin kecil (0.1)
+ *     Track surface = TRACK_H/2 = 0.2, car half height = 0.45
+ *     → Spawn Y = 0.2 + 0.45 + 0.1 = 0.75 (tepat di atas track)
+ *  2. Raycast max distance = 8m (cukup untuk semua kondisi)
+ *  3. Frame counter: skip physics 5 frame pertama, langsung set posisi
+ *  4. Gunakan setNextKinematicTranslation BUKAN setTranslation
+ *  5. Ground snap agresif di frame-frame awal
  * ──────────────────────────────────────────────────────────────────────────────
  */
 import { useRef, useEffect } from "react";
@@ -26,9 +34,18 @@ import { useCinematicCamera } from "@/hooks/useCinematicCamera";
 import CarMesh from "./CarMesh";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SPAWN_POS: [number, number, number] = [0, 2.5, -30];
-const GRAVITY        = 28;   // m/s² manual gravity
-const DRIFT_FACTOR   = 0.14; // lateral sliding factor
+// Track surface Y = TRACK_H / 2 = 0.4 / 2 = 0.2
+// Car collider half height = 0.45
+// Car sits at: 0.2 + 0.45 + 0.05 (small margin) = 0.70
+const TRACK_SURFACE_Y = 0.2;
+const CAR_HALF_H      = 0.45;
+const SPAWN_Y         = TRACK_SURFACE_Y + CAR_HALF_H + 0.05; // = 0.70
+const SPAWN_POS: [number, number, number] = [0, SPAWN_Y, -30];
+
+const GRAVITY         = 30;    // m/s² manual gravity (lebih kuat)
+const DRIFT_FACTOR    = 0.12;  // lateral sliding
+const RAY_MAX_DIST    = 8.0;   // raycast max distance (lebih panjang)
+const GROUND_OFFSET   = CAR_HALF_H + 0.05; // jarak center ke ground
 
 // ─── Component ────────────────────────────────────────────────────────────────
 interface Props {
@@ -44,15 +61,15 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
   const wheelRRRef = useRef<THREE.Group>(null);
 
   // Arcade state (refs = no re-render)
-  const velocity    = useRef(0);   // m/s forward
-  const velY        = useRef(0);   // m/s vertical (gravity)
-  const yaw         = useRef(0);   // world yaw radians
-  const steer       = useRef(0);   // current steer angle
+  const velocity    = useRef(0);
+  const velY        = useRef(0);
+  const yaw         = useRef(0);
+  const steer       = useRef(0);
   const lapTimer    = useRef(0);
   const lastCP      = useRef(-1);
   const cpPassed    = useRef(0);
   const startCD     = useRef(3.5);
-  const isOnGround  = useRef(false);
+  const frameCount  = useRef(0);   // frame counter untuk init delay
 
   const { rapier, world } = useRapier();
 
@@ -73,15 +90,9 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     maxRoll: 0.04,
   });
 
-  // ── Reset car to spawn ─────────────────────────────────────────────────────
+  // ── Reset car ke spawn ─────────────────────────────────────────────────────
   const resetCar = () => {
     if (!bodyRef.current) return;
-    bodyRef.current.setNextKinematicTranslation({
-      x: SPAWN_POS[0],
-      y: SPAWN_POS[1],
-      z: SPAWN_POS[2],
-    });
-    bodyRef.current.setNextKinematicRotation({ x: 0, y: 0, z: 0, w: 1 });
     velocity.current  = 0;
     velY.current      = 0;
     steer.current     = 0;
@@ -89,6 +100,13 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     cpPassed.current  = 0;
     lastCP.current    = -1;
     startCD.current   = 3.5;
+    frameCount.current = 0;
+    bodyRef.current.setNextKinematicTranslation({
+      x: SPAWN_POS[0],
+      y: SPAWN_POS[1],
+      z: SPAWN_POS[2],
+    });
+    bodyRef.current.setNextKinematicRotation({ x: 0, y: 0, z: 0, w: 1 });
   };
 
   useEffect(() => {
@@ -100,9 +118,24 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
   // ── Physics frame ─────────────────────────────────────────────────────────
   useFrame((_, delta) => {
     if (!bodyRef.current) return;
-    const dt   = Math.min(delta, 0.05);
+    const dt = Math.min(delta, 0.05);
+
+    frameCount.current++;
+
+    // ── INIT PHASE: 10 frame pertama — paksa posisi tepat di atas track ──
+    // Physics world butuh beberapa frame untuk collider aktif
+    if (frameCount.current <= 10) {
+      bodyRef.current.setNextKinematicTranslation({
+        x: SPAWN_POS[0],
+        y: SPAWN_POS[1],
+        z: SPAWN_POS[2],
+      });
+      bodyRef.current.setNextKinematicRotation({ x: 0, y: 0, z: 0, w: 1 });
+      return;
+    }
+
     const ctrl = controls.current;
-    const { accelForce, maxSpeed, turnSpeed, brakeForce } = carConfig;
+    const { accelForce, maxSpeed, turnSpeed } = carConfig;
 
     // ── Reset ──────────────────────────────────────────────────────────────
     if (ctrl.reset) {
@@ -110,19 +143,49 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
       return;
     }
 
+    // ── Current position ───────────────────────────────────────────────────
+    const pos = bodyRef.current.translation();
+
+    // ── Ground detection via raycast ──────────────────────────────────────
+    // Ray origin sedikit di atas center mobil
+    const rayOrigin = { x: pos.x, y: pos.y + 0.5, z: pos.z };
+    const rayDir    = { x: 0, y: -1, z: 0 };
+    const ray       = new rapier.Ray(rayOrigin, rayDir);
+    const hit       = world.castRay(ray, RAY_MAX_DIST, true);
+
+    let newY = pos.y;
+    let onGround = false;
+
+    if (hit) {
+      // groundY = origin Y - timeOfImpact
+      const groundY = pos.y + 0.5 - hit.timeOfImpact;
+      const targetY = groundY + GROUND_OFFSET;
+      onGround = true;
+      velY.current = 0;
+
+      // Snap agresif di awal, smooth setelahnya
+      const snapSpeed = frameCount.current < 30 ? 1.0 : Math.min(dt * 20, 1);
+      newY = THREE.MathUtils.lerp(pos.y, targetY, snapSpeed);
+    } else {
+      // Udara — gravity
+      velY.current -= GRAVITY * dt;
+      newY = pos.y + velY.current * dt;
+
+      // Safety net
+      if (newY < -15) {
+        resetCar();
+        return;
+      }
+    }
+
     // ── Countdown ─────────────────────────────────────────────────────────
     if (startCD.current > 0) {
       startCD.current = Math.max(0, startCD.current - dt);
-      // Still apply gravity during countdown
-      const pos = bodyRef.current.translation();
-      velY.current -= GRAVITY * dt;
-      const newY = pos.y + velY.current * dt;
       bodyRef.current.setNextKinematicTranslation({ x: pos.x, y: newY, z: pos.z });
       return;
     }
 
-    // ── Current position & forward direction ───────────────────────────────
-    const pos = bodyRef.current.translation();
+    // ── Forward direction ──────────────────────────────────────────────────
     const fwd = new THREE.Vector3(
       Math.sin(yaw.current),
       0,
@@ -131,30 +194,23 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
 
     // ── Acceleration / Braking ─────────────────────────────────────────────
     if (ctrl.forward) {
-      velocity.current = Math.min(
-        velocity.current + accelForce * dt,
-        maxSpeed
-      );
+      velocity.current = Math.min(velocity.current + accelForce * dt, maxSpeed);
     } else if (ctrl.backward) {
-      velocity.current = Math.max(
-        velocity.current - accelForce * 0.6 * dt,
-        -maxSpeed * 0.35
-      );
+      velocity.current = Math.max(velocity.current - accelForce * 0.6 * dt, -maxSpeed * 0.35);
     } else if (ctrl.brake) {
       velocity.current *= Math.pow(0.05, dt);
     } else {
-      // Engine drag
       velocity.current *= Math.pow(0.55, dt);
     }
 
     // ── Speed-sensitive steering ───────────────────────────────────────────
     const speedNorm = Math.abs(velocity.current) / maxSpeed;
-    const steerSensitivity = turnSpeed * (0.4 + 0.6 * speedNorm);
-    const maxSteer = 0.032 * (1.0 - speedNorm * 0.35);
+    const steerSens = turnSpeed * (0.4 + 0.6 * speedNorm);
+    const maxSteer  = 0.032 * (1.0 - speedNorm * 0.35);
 
-    if (ctrl.left)  steer.current = Math.max(steer.current - steerSensitivity * dt, -maxSteer);
-    else if (ctrl.right) steer.current = Math.min(steer.current + steerSensitivity * dt, maxSteer);
-    else steer.current *= Math.pow(0.08, dt);
+    if (ctrl.left)       steer.current = Math.max(steer.current - steerSens * dt, -maxSteer);
+    else if (ctrl.right) steer.current = Math.min(steer.current + steerSens * dt,  maxSteer);
+    else                 steer.current *= Math.pow(0.08, dt);
 
     // ── Yaw update ─────────────────────────────────────────────────────────
     if (Math.abs(velocity.current) > 0.1) {
@@ -162,7 +218,7 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
       yaw.current += steer.current * dir * Math.abs(velocity.current) * 2.2;
     }
 
-    // ── Lateral drift impulse ──────────────────────────────────────────────
+    // ── Lateral drift ──────────────────────────────────────────────────────
     const right = new THREE.Vector3(
       Math.cos(yaw.current),
       0,
@@ -170,37 +226,10 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     );
     const lateralSlide = steer.current * Math.abs(velocity.current) * DRIFT_FACTOR;
 
-    // ── Desired horizontal movement ────────────────────────────────────────
     const moveX = fwd.x * velocity.current * dt + right.x * lateralSlide * dt;
     const moveZ = fwd.z * velocity.current * dt + right.z * lateralSlide * dt;
 
-    // ── Ground detection via ray cast ─────────────────────────────────────
-    const rayOrigin = { x: pos.x, y: pos.y + 0.3, z: pos.z };
-    const rayDir    = { x: 0, y: -1, z: 0 };
-    const ray       = new rapier.Ray(rayOrigin, rayDir);
-    const hit       = world.castRay(ray, 2.5, true);
-
-    let newY = pos.y;
-    if (hit) {
-      const groundY = pos.y + 0.3 - hit.timeOfImpact;
-      const targetY = groundY + 0.55; // car sits 0.55m above ground
-      isOnGround.current = true;
-      velY.current = 0;
-      // Smooth snap to ground
-      newY = THREE.MathUtils.lerp(pos.y, targetY, Math.min(dt * 18, 1));
-    } else {
-      // In air — apply gravity
-      isOnGround.current = false;
-      velY.current -= GRAVITY * dt;
-      newY = pos.y + velY.current * dt;
-      // Safety net — if fallen too far, reset
-      if (newY < -20) {
-        resetCar();
-        return;
-      }
-    }
-
-    // ── Apply kinematic next position ─────────────────────────────────────
+    // ── Apply kinematic position ───────────────────────────────────────────
     bodyRef.current.setNextKinematicTranslation({
       x: pos.x + moveX,
       y: newY,
@@ -231,7 +260,7 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     if (wheelRLRef.current) wheelRLRef.current.children[0].rotation.x += wheelSpin;
     if (wheelRRRef.current) wheelRRRef.current.children[0].rotation.x += wheelSpin;
 
-    // ── Telemetry → Zustand ────────────────────────────────────────────────
+    // ── Telemetry ──────────────────────────────────────────────────────────
     const kmh = Math.abs(velocity.current) * 3.6;
     setTelemetry(kmh, steer.current);
 
@@ -239,23 +268,20 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     lapTimer.current += dt;
     setLapTime(lapTimer.current);
 
-    // ── Checkpoint detection (city circuit) ───────────────────────────────
+    // ── Checkpoint detection ───────────────────────────────────────────────
     const np = bodyRef.current.translation();
 
-    // CP0: east straight
     if (np.x > 38 && Math.abs(np.z) < 20 && lastCP.current !== 0) {
       lastCP.current = 0; cpPassed.current++;
     }
-    // CP1: north straight
     if (Math.abs(np.x) < 20 && np.z > 38 && lastCP.current !== 1) {
       lastCP.current = 1; cpPassed.current++;
     }
-    // CP2: west straight
     if (np.x < -38 && Math.abs(np.z) < 20 && lastCP.current !== 2) {
       lastCP.current = 2; cpPassed.current++;
     }
 
-    // ── Finish line (south straight, near spawn) ───────────────────────────
+    // ── Finish line ────────────────────────────────────────────────────────
     if (
       startCD.current === 0 &&
       Math.abs(np.x) < 14 &&
@@ -277,7 +303,8 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
       position={SPAWN_POS}
       colliders={false}
     >
-      {/* Hitbox mobil — sedikit lebih kecil dari visual agar tidak nyangkut */}
+      {/* Hitbox: lebar 1.9m, tinggi 0.9m, panjang 4.2m */}
+      {/* Center di Y=0.45 dari pivot (pivot ada di bawah mobil) */}
       <CuboidCollider args={[0.95, 0.45, 2.1]} position={[0, 0.45, 0]} />
 
       <CarMesh

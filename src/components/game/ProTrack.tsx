@@ -239,9 +239,10 @@ export default function CityTrack() {
   return (
     <group>
       {/* ── Ground / City floor ── */}
+      {/* Y=-2 to 0 (tebal 4) — solid base, tidak ada celah dengan road (Y=0 to 0.4) */}
       <RigidBody type="fixed" colliders="cuboid">
-        <mesh position={[0, -0.5, 0]} receiveShadow>
-          <boxGeometry args={[300, 1, 300]} />
+        <mesh position={[0, -2, 0]} receiveShadow>
+          <boxGeometry args={[400, 4, 400]} />
           <meshStandardMaterial color="#111114" roughness={0.95} metalness={0.0} />
         </mesh>
       </RigidBody>
