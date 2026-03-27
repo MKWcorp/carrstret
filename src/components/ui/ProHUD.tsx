@@ -1,31 +1,27 @@
 "use client";
-
 /**
- * ─── ProHUD ────────────────────────────────────────────────────────────────────
+ * ─── ProHUD v2 ─────────────────────────────────────────────────────────────────
  *
- * Heads-Up Display profesional yang di-overlay di atas Canvas.
+ * Layout bersih — tidak ada tombol yang overlap:
  *
- * Komponen:
- *  - Speedometer analog (jarum berputar) + digital readout
- *  - Lap counter (LAP 1/3)
- *  - Lap timer + best time
- *  - Gear indicator (simulasi)
- *  - Nitro bar (placeholder — siap dihubungkan ke sistem nitro)
- *  - Mute button
+ *  TOP-LEFT:    Car badge + nama mobil
+ *  TOP-CENTER:  Lap counter + timer
+ *  TOP-RIGHT:   Pause button + Mute button (stacked vertikal, tidak overlap)
+ *  BOT-RIGHT:   Speedometer analog + Gear
+ *  BOT-LEFT:    (kosong — ruang untuk virtual D-pad di mobile)
  *
- * Data di-subscribe langsung dari Zustand store (update setiap frame).
+ * Virtual controls (D-pad) dirender oleh VirtualControls.tsx secara terpisah
+ * dan hanya muncul di layar kecil (sm:hidden).
  * ──────────────────────────────────────────────────────────────────────────────
  */
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useGameStore } from "@/store/useGameStore";
 import { useAudioStore } from "@/store/useAudioStore";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  const m  = Math.floor(seconds / 60);
+  const s  = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 100);
   return `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(2, "0")}`;
 }
@@ -40,14 +36,7 @@ function getGear(speedKmh: number): string {
 }
 
 // ─── Speedometer Canvas ───────────────────────────────────────────────────────
-
-function SpeedometerCanvas({
-  speed,
-  maxSpeed,
-}: {
-  speed: number;
-  maxSpeed: number;
-}) {
+function SpeedometerCanvas({ speed, maxSpeed }: { speed: number; maxSpeed: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -56,111 +45,100 @@ function SpeedometerCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const W = canvas.width;
-    const H = canvas.height;
+    const W  = canvas.width;
+    const H  = canvas.height;
     const cx = W / 2;
     const cy = H / 2;
     const R  = W * 0.42;
 
     ctx.clearRect(0, 0, W, H);
 
-    // ── Background circle ──────────────────────────────────────────────────
+    // BG circle
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillStyle = "rgba(0,0,0,0.78)";
     ctx.fill();
-
-    // ── Outer ring ─────────────────────────────────────────────────────────
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // ── Arc range: 210° to 330° (clockwise from bottom-left to bottom-right)
     const startAngle = (210 * Math.PI) / 180;
-    const endAngle   = (330 * Math.PI) / 180; // wraps through 0
+    const arcSpan    = (300 * Math.PI) / 180;
+    const norm       = Math.min(speed / maxSpeed, 1);
+    const arcEnd     = startAngle + norm * arcSpan;
 
-    // ── Background arc (grey) ──────────────────────────────────────────────
+    // BG arc
     ctx.beginPath();
-    ctx.arc(cx, cy, R * 0.82, startAngle, endAngle);
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.lineWidth = R * 0.12;
+    ctx.arc(cx, cy, R * 0.8, startAngle, startAngle + arcSpan);
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.lineWidth   = R * 0.13;
     ctx.stroke();
 
-    // ── Speed arc (coloured) ───────────────────────────────────────────────
-    const norm     = Math.min(speed / maxSpeed, 1);
-    const arcSpan  = (300 * Math.PI) / 180; // total 300 degrees
-    const arcEnd   = startAngle + norm * arcSpan;
+    // Speed arc
     const arcColor = norm < 0.6
-      ? `hsl(${120 - norm * 120}, 100%, 55%)`   // green → yellow
-      : `hsl(${60  - (norm - 0.6) * 150}, 100%, 55%)`; // yellow → red
-
+      ? `hsl(${120 - norm * 120}, 100%, 55%)`
+      : `hsl(${60 - (norm - 0.6) * 150}, 100%, 55%)`;
     ctx.beginPath();
-    ctx.arc(cx, cy, R * 0.82, startAngle, arcEnd);
+    ctx.arc(cx, cy, R * 0.8, startAngle, arcEnd);
     ctx.strokeStyle = arcColor;
-    ctx.lineWidth = R * 0.12;
-    ctx.lineCap = "round";
+    ctx.lineWidth   = R * 0.13;
+    ctx.lineCap     = "round";
     ctx.stroke();
 
-    // ── Tick marks ─────────────────────────────────────────────────────────
-    const ticks = 10;
-    for (let i = 0; i <= ticks; i++) {
-      const angle = startAngle + (i / ticks) * arcSpan;
-      const inner = R * 0.65;
-      const outer = R * 0.78;
+    // Tick marks
+    for (let i = 0; i <= 10; i++) {
+      const angle = startAngle + (i / 10) * arcSpan;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
-      ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-      ctx.strokeStyle = "rgba(255,255,255,0.4)";
-      ctx.lineWidth = i % 2 === 0 ? 2 : 1;
+      ctx.moveTo(cx + Math.cos(angle) * R * 0.63, cy + Math.sin(angle) * R * 0.63);
+      ctx.lineTo(cx + Math.cos(angle) * R * 0.75, cy + Math.sin(angle) * R * 0.75);
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth   = i % 2 === 0 ? 2 : 1;
       ctx.stroke();
     }
 
-    // ── Needle ─────────────────────────────────────────────────────────────
+    // Needle
     const needleAngle = startAngle + norm * arcSpan;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(needleAngle);
     ctx.beginPath();
-    ctx.moveTo(-4, 0);
-    ctx.lineTo(R * 0.72, 0);
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
+    ctx.moveTo(-3, 0);
+    ctx.lineTo(R * 0.7, 0);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth   = 2.5;
+    ctx.lineCap     = "round";
     ctx.stroke();
     ctx.restore();
 
-    // ── Center dot ─────────────────────────────────────────────────────────
+    // Center dot
     ctx.beginPath();
-    ctx.arc(cx, cy, R * 0.1, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffffff";
+    ctx.arc(cx, cy, R * 0.09, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
     ctx.fill();
 
-    // ── Digital speed ──────────────────────────────────────────────────────
-    ctx.font = `bold ${R * 0.38}px 'Courier New', monospace`;
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
+    // Digital speed
+    ctx.font         = `bold ${R * 0.36}px 'Courier New', monospace`;
+    ctx.fillStyle    = "#fff";
+    ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(Math.round(speed).toString(), cx, cy + R * 0.28);
+    ctx.fillText(Math.round(speed).toString(), cx, cy + R * 0.26);
 
-    ctx.font = `${R * 0.16}px sans-serif`;
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.fillText("km/h", cx, cy + R * 0.52);
+    ctx.font      = `${R * 0.15}px sans-serif`;
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.fillText("km/h", cx, cy + R * 0.5);
   }, [speed, maxSpeed]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={160}
-      height={160}
-      className="drop-shadow-[0_0_12px_rgba(0,200,255,0.5)]"
+      width={150}
+      height={150}
+      className="drop-shadow-[0_0_10px_rgba(0,200,255,0.4)]"
     />
   );
 }
 
 // ─── Main HUD ─────────────────────────────────────────────────────────────────
-
 export default function ProHUD() {
   const speed       = useGameStore((s) => s.speed);
   const lapTime     = useGameStore((s) => s.lapTime);
@@ -168,105 +146,97 @@ export default function ProHUD() {
   const currentLap  = useGameStore((s) => s.currentLap);
   const totalLaps   = useGameStore((s) => s.totalLaps);
   const selectedCar = useGameStore((s) => s.selectedCar);
+  const screen      = useGameStore((s) => s.screen);
+  const setScreen   = useGameStore((s) => s.setScreen);
   const isMuted     = useAudioStore((s) => s.isMuted);
   const toggleMute  = useAudioStore((s) => s.toggleMute);
 
   const maxSpeedKmh = selectedCar.maxSpeed * 3.6;
   const gear        = getGear(speed);
 
-  // Nitro bar (placeholder — 0 to 100)
-  const [nitro] = useState(75);
-
   return (
-    <div className="absolute inset-0 pointer-events-none select-none">
+    <div className="absolute inset-0 pointer-events-none select-none z-10">
 
-      {/* ── Bottom-right: Speedometer ── */}
-      <div className="absolute bottom-4 right-4 flex flex-col items-center gap-1 pointer-events-none">
-        <SpeedometerCanvas speed={speed} maxSpeed={maxSpeedKmh} />
-        {/* Gear indicator */}
-        <div className="flex items-center gap-2 mt-1">
-          <span className="text-white/40 text-xs uppercase tracking-widest">Gear</span>
-          <span className="text-white font-bold text-2xl font-mono leading-none">{gear}</span>
-        </div>
+      {/* ══ TOP-LEFT: Car badge ══════════════════════════════════════════════ */}
+      <div className="absolute top-3 left-3 flex items-center gap-2 bg-black/55 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
+        <div
+          className="w-2.5 h-2.5 rounded-full shrink-0"
+          style={{
+            backgroundColor: selectedCar.color,
+            boxShadow: `0 0 6px ${selectedCar.color}`,
+          }}
+        />
+        <span className="text-white/80 text-xs font-semibold tracking-wide leading-none">
+          {selectedCar.name}
+        </span>
       </div>
 
-      {/* ── Bottom-left: Nitro bar ── */}
-      <div className="absolute bottom-6 left-4 flex flex-col gap-1 w-28">
-        <span className="text-xs text-cyan-400 tracking-widest uppercase font-bold">Nitro</span>
-        <div className="h-3 rounded-full bg-white/10 overflow-hidden border border-white/10">
-          <div
-            className="h-full rounded-full transition-all duration-100"
-            style={{
-              width: `${nitro}%`,
-              background: "linear-gradient(90deg, #00f0ff, #0088ff)",
-              boxShadow: "0 0 8px #00f0ff",
-            }}
-          />
-        </div>
-        <span className="text-white/50 text-xs text-right">{nitro}%</span>
-      </div>
-
-      {/* ── Top-center: Lap info ── */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-0.5">
+      {/* ══ TOP-CENTER: Lap + Timer ══════════════════════════════════════════ */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
         {/* Lap counter */}
-        <div className="flex items-center gap-2 bg-black/50 backdrop-blur-sm px-5 py-1.5 rounded-full border border-white/10">
-          <span className="text-white/50 text-xs uppercase tracking-widest">Lap</span>
-          <span className="text-white font-bold text-xl font-mono">
+        <div className="flex items-center gap-2 bg-black/60 backdrop-blur-sm px-4 py-1.5 rounded-full border border-white/10">
+          <span className="text-white/40 text-[10px] uppercase tracking-widest">Lap</span>
+          <span className="text-white font-bold text-lg font-mono leading-none">
             {currentLap}
-            <span className="text-white/40 text-sm"> / {totalLaps}</span>
+            <span className="text-white/35 text-sm"> / {totalLaps}</span>
           </span>
         </div>
-
-        {/* Lap timer */}
-        <div className="flex items-center gap-3 bg-black/40 backdrop-blur-sm px-4 py-1 rounded-full border border-white/8">
+        {/* Timers */}
+        <div className="flex items-center gap-3 bg-black/45 backdrop-blur-sm px-3 py-1 rounded-full border border-white/8">
           <div className="flex flex-col items-center">
-            <span className="text-white/40 text-[9px] uppercase tracking-widest">Current</span>
-            <span className="text-white font-mono text-sm font-semibold">
-              {formatTime(lapTime)}
-            </span>
+            <span className="text-white/35 text-[8px] uppercase tracking-widest">Current</span>
+            <span className="text-white font-mono text-xs font-semibold">{formatTime(lapTime)}</span>
           </div>
           {bestLapTime !== null && (
             <>
-              <div className="w-px h-6 bg-white/15" />
+              <div className="w-px h-5 bg-white/12" />
               <div className="flex flex-col items-center">
-                <span className="text-yellow-400/70 text-[9px] uppercase tracking-widest">Best</span>
-                <span className="text-yellow-300 font-mono text-sm font-semibold">
-                  {formatTime(bestLapTime)}
-                </span>
+                <span className="text-yellow-400/60 text-[8px] uppercase tracking-widest">Best</span>
+                <span className="text-yellow-300 font-mono text-xs font-semibold">{formatTime(bestLapTime)}</span>
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* ── Top-right: Mute button ── */}
-      <button
-        className="absolute top-4 right-4 pointer-events-auto w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm border border-white/15 flex items-center justify-center text-lg hover:bg-white/10 transition-colors"
-        onClick={toggleMute}
-        aria-label={isMuted ? "Unmute" : "Mute"}
-      >
-        {isMuted ? "🔇" : "🔊"}
-      </button>
-
-      {/* ── Top-left: Car name ── */}
-      <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
-        <div
-          className="w-3 h-3 rounded-full"
-          style={{ backgroundColor: selectedCar.color, boxShadow: `0 0 6px ${selectedCar.color}` }}
-        />
-        <span className="text-white/80 text-xs font-semibold tracking-wide">
-          {selectedCar.name}
-        </span>
+      {/* ══ TOP-RIGHT: Pause + Mute (stacked, pointer-events-auto) ══════════ */}
+      <div className="absolute top-3 right-3 flex flex-col gap-1.5 pointer-events-auto">
+        {/* Pause button — desktop only */}
+        <button
+          className="hidden sm:flex w-9 h-9 rounded-full bg-black/55 backdrop-blur-sm border border-white/12 items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors text-sm"
+          onClick={() => setScreen(screen === "paused" ? "playing" : "paused")}
+          aria-label="Pause"
+          title="Pause (ESC)"
+        >
+          ⏸
+        </button>
+        {/* Mute button */}
+        <button
+          className="w-9 h-9 rounded-full bg-black/55 backdrop-blur-sm border border-white/12 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors text-sm"
+          onClick={toggleMute}
+          aria-label={isMuted ? "Unmute" : "Mute"}
+        >
+          {isMuted ? "🔇" : "🔊"}
+        </button>
       </div>
 
-      {/* ── Speed warning flash (at max speed) ── */}
-      {speed > maxSpeedKmh * 0.92 && (
+      {/* ══ BOTTOM-RIGHT: Speedometer + Gear ════════════════════════════════ */}
+      <div className="absolute bottom-4 right-3 flex flex-col items-center gap-1">
+        <SpeedometerCanvas speed={speed} maxSpeed={maxSpeedKmh} />
+        <div className="flex items-center gap-1.5">
+          <span className="text-white/35 text-[9px] uppercase tracking-widest">Gear</span>
+          <span className="text-white font-bold text-xl font-mono leading-none">{gear}</span>
+        </div>
+      </div>
+
+      {/* ══ Speed flash at max speed ════════════════════════════════════════ */}
+      {speed > maxSpeedKmh * 0.93 && (
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              "radial-gradient(ellipse at center, transparent 60%, rgba(255,50,0,0.12) 100%)",
-            animation: "pulse 0.4s ease-in-out infinite alternate",
+              "radial-gradient(ellipse at center, transparent 55%, rgba(255,60,0,0.1) 100%)",
+            animation: "pulse 0.35s ease-in-out infinite alternate",
           }}
         />
       )}
