@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* ─── Base Reset ──────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes gridMove {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 60px; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease forwards;
+}
+
+/* ─── Canvas ─────────────────────────────────────────────────────────────── */
+canvas {
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+
+button, a {
+  touch-action: manipulation;
+}
