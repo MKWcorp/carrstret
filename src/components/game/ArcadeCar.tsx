@@ -1,20 +1,27 @@
 "use client";
 /**
- * ─── ArcadeCar v5 ──────────────────────────────────────────────────────────────
+ * ─── ArcadeCar v6 ──────────────────────────────────────────────────────────────
  *
- * PENDEKATAN BARU: Pure Kinematic tanpa raycast
+ * FIX TEMBUS TEMBOK:
+ *  kinematicPosition body di Rapier TIDAK punya collision response otomatis.
+ *  Solusi: deteksi dinding secara manual dengan AABB check setiap frame.
  *
- * Masalah raycast:
- *  - castRay di Rapier kinematic body tidak reliable di semua frame
- *  - Bisa mendeteksi collider mobil sendiri sebagai ground
- *  - Hasilnya tidak konsisten → mobil terbang atau tembus
+ * CIRCUIT LAYOUT (dari ProTrack):
+ *  Outer walls: ±HALF_CIRC (±51)
+ *  Inner walls: ±INNER (±37)
+ *  Track width: 14 (jalan ada di antara inner dan outer)
+ *  Corner: area di mana inner dan outer tidak bertemu (bebas belok)
  *
- * Solusi: Y position di-clamp ke TRACK_Y secara hardcode
- *  - Track surface selalu di Y = TRACK_H/2 = 0.2
- *  - Mobil selalu duduk di Y = TRACK_Y + CAR_SEAT_HEIGHT
- *  - Tidak ada raycast, tidak ada gravity, tidak ada velY
- *  - 100% reliable, tidak bisa terbang, tidak bisa tembus
- *  - Arcade feel tetap ada karena movement XZ tetap physics-based
+ *  Mobil dianggap berada di "straight" jika:
+ *    - South straight: z < -INNER && |x| < HALF_CIRC - 2
+ *    - North straight: z > INNER  && |x| < HALF_CIRC - 2
+ *    - East straight:  x > INNER  && |z| < HALF_CIRC - 2
+ *    - West straight:  x < -INNER && |z| < HALF_CIRC - 2
+ *
+ *  Di area corner (|x| > INNER && |z| > INNER), tidak ada inner wall.
+ *
+ * COLLISION RESPONSE:
+ *  Saat mobil menyentuh wall, posisinya di-clamp dan velocity di-reflect/dampen.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 import { useRef, useEffect } from "react";
@@ -30,16 +37,91 @@ import { useGameStore } from "@/store/useGameStore";
 import { useCinematicCamera } from "@/hooks/useCinematicCamera";
 import CarMesh from "./CarMesh";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-// Track: TRACK_H = 0.4, surface top = TRACK_H/2 = 0.2
-// Car collider half height = 0.45
-// Car Y = track surface + car half height = 0.2 + 0.45 = 0.65
-const TRACK_Y      = 0.2;   // top surface of track
-const CAR_SEAT_H   = 0.45;  // half height of car collider
-const CAR_Y        = TRACK_Y + CAR_SEAT_H; // = 0.65 — mobil selalu di sini
+// ─── Circuit constants (harus sama dengan ProTrack) ───────────────────────────
+const TRACK_Y    = 0.2;   // top surface of track (TRACK_H/2)
+const CAR_SEAT_H = 0.45;  // half height of car collider
+const CAR_Y      = TRACK_Y + CAR_SEAT_H; // = 0.65
+
+const OUTER      = 51;    // outer wall position (HALF_CIRC)
+const INNER      = 37;    // inner wall position
+const CAR_HALF_W = 1.0;   // half width of car (collision margin)
+const CAR_HALF_L = 2.2;   // half length of car (collision margin)
 
 const SPAWN_POS: [number, number, number] = [0, CAR_Y, -30];
 const DRIFT_FACTOR = 0.12;
+const WALL_BOUNCE  = 0.3;  // velocity retained after wall hit
+
+// ─── Wall collision check ─────────────────────────────────────────────────────
+// Returns corrected {x, z} and whether a collision happened
+function resolveWallCollision(
+  x: number,
+  z: number,
+  vx: number,   // velocity X component
+  vz: number,   // velocity Z component
+  speed: number,
+): {
+  nx: number; nz: number;
+  nvx: number; nvz: number;
+  hit: boolean;
+} {
+  let nx = x, nz = z, nvx = vx, nvz = vz;
+  let hit = false;
+
+  const inCorner = Math.abs(x) > INNER && Math.abs(z) > INNER;
+
+  // ── Outer wall clamp ──────────────────────────────────────────────────────
+  if (nx + CAR_HALF_W > OUTER) {
+    nx = OUTER - CAR_HALF_W;
+    nvx = -Math.abs(nvx) * WALL_BOUNCE;
+    hit = true;
+  }
+  if (nx - CAR_HALF_W < -OUTER) {
+    nx = -OUTER + CAR_HALF_W;
+    nvx = Math.abs(nvx) * WALL_BOUNCE;
+    hit = true;
+  }
+  if (nz + CAR_HALF_L > OUTER) {
+    nz = OUTER - CAR_HALF_L;
+    nvz = -Math.abs(nvz) * WALL_BOUNCE;
+    hit = true;
+  }
+  if (nz - CAR_HALF_L < -OUTER) {
+    nz = -OUTER + CAR_HALF_L;
+    nvz = Math.abs(nvz) * WALL_BOUNCE;
+    hit = true;
+  }
+
+  // ── Inner wall clamp (hanya di straight, bukan corner) ───────────────────
+  if (!inCorner) {
+    // East inner wall (x > INNER, z di dalam range)
+    if (Math.abs(z) < INNER + 2 && nx - CAR_HALF_W < -INNER && nx > -(INNER + 2)) {
+      // West inner
+      nx = -INNER + CAR_HALF_W;
+      nvx = Math.abs(nvx) * WALL_BOUNCE;
+      hit = true;
+    }
+    if (Math.abs(z) < INNER + 2 && nx + CAR_HALF_W > INNER && nx < INNER + 2) {
+      // East inner
+      nx = INNER - CAR_HALF_W;
+      nvx = -Math.abs(nvx) * WALL_BOUNCE;
+      hit = true;
+    }
+    if (Math.abs(x) < INNER + 2 && nz - CAR_HALF_L < -INNER && nz > -(INNER + 2)) {
+      // South inner
+      nz = -INNER + CAR_HALF_L;
+      nvz = Math.abs(nvz) * WALL_BOUNCE;
+      hit = true;
+    }
+    if (Math.abs(x) < INNER + 2 && nz + CAR_HALF_L > INNER && nz < INNER + 2) {
+      // North inner
+      nz = INNER - CAR_HALF_L;
+      nvz = -Math.abs(nvz) * WALL_BOUNCE;
+      hit = true;
+    }
+  }
+
+  return { nx, nz, nvx, nvz, hit };
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 interface Props {
@@ -54,7 +136,6 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
   const wheelRLRef = useRef<THREE.Group>(null);
   const wheelRRRef = useRef<THREE.Group>(null);
 
-  // Arcade state
   const velocity  = useRef(0);
   const yaw       = useRef(0);
   const steer     = useRef(0);
@@ -66,7 +147,6 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
   const { setTelemetry, toggleEngine, setLapTime, completeLap } =
     useGameStore.getState();
 
-  // ── Cinematic camera ──────────────────────────────────────────────────────
   useCinematicCamera(bodyRef, steer, velocity, {
     baseFov: 60,
     maxFovBoost: 20,
@@ -80,7 +160,6 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     maxRoll: 0.04,
   });
 
-  // ── Reset ─────────────────────────────────────────────────────────────────
   const resetCar = () => {
     if (!bodyRef.current) return;
     velocity.current = 0;
@@ -90,9 +169,7 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     lastCP.current   = -1;
     startCD.current  = 3.5;
     bodyRef.current.setNextKinematicTranslation({
-      x: SPAWN_POS[0],
-      y: CAR_Y,
-      z: SPAWN_POS[2],
+      x: SPAWN_POS[0], y: CAR_Y, z: SPAWN_POS[2],
     });
     bodyRef.current.setNextKinematicRotation({ x: 0, y: 0, z: 0, w: 1 });
   };
@@ -103,28 +180,21 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Main physics frame ─────────────────────────────────────────────────────
   useFrame((_, delta) => {
     if (!bodyRef.current) return;
     const dt   = Math.min(delta, 0.05);
     const ctrl = controls.current;
     const { accelForce, maxSpeed, turnSpeed } = carConfig;
 
-    // ── Reset ──────────────────────────────────────────────────────────────
     if (ctrl.reset) { resetCar(); return; }
 
-    // ── Countdown ─────────────────────────────────────────────────────────
     if (startCD.current > 0) {
       startCD.current = Math.max(0, startCD.current - dt);
-      // Tetap clamp Y selama countdown
       const pos = bodyRef.current.translation();
-      bodyRef.current.setNextKinematicTranslation({
-        x: pos.x, y: CAR_Y, z: pos.z,
-      });
+      bodyRef.current.setNextKinematicTranslation({ x: pos.x, y: CAR_Y, z: pos.z });
       return;
     }
 
-    // ── Get current position ───────────────────────────────────────────────
     const pos = bodyRef.current.translation();
 
     // ── Acceleration ───────────────────────────────────────────────────────
@@ -138,7 +208,7 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
       velocity.current *= Math.pow(0.55, dt);
     }
 
-    // ── Speed-sensitive steering ───────────────────────────────────────────
+    // ── Steering ───────────────────────────────────────────────────────────
     const speedNorm = Math.abs(velocity.current) / maxSpeed;
     const steerSens = turnSpeed * (0.4 + 0.6 * speedNorm);
     const maxSteer  = 0.032 * (1.0 - speedNorm * 0.35);
@@ -153,15 +223,30 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
       yaw.current += steer.current * dir * Math.abs(velocity.current) * 2.2;
     }
 
-    // ── Movement vectors ───────────────────────────────────────────────────
+    // ── Movement ───────────────────────────────────────────────────────────
     const fwd   = new THREE.Vector3(Math.sin(yaw.current), 0, Math.cos(yaw.current));
     const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current));
     const slide = steer.current * Math.abs(velocity.current) * DRIFT_FACTOR;
 
-    const newX = pos.x + fwd.x * velocity.current * dt + right.x * slide * dt;
-    const newZ = pos.z + fwd.z * velocity.current * dt + right.z * slide * dt;
+    let newX = pos.x + fwd.x * velocity.current * dt + right.x * slide * dt;
+    let newZ = pos.z + fwd.z * velocity.current * dt + right.z * slide * dt;
 
-    // ── Apply position — Y SELALU = CAR_Y (tidak bisa terbang/tembus) ──────
+    // ── Wall collision (manual AABB) ───────────────────────────────────────
+    const vx = fwd.x * velocity.current + right.x * slide;
+    const vz = fwd.z * velocity.current + right.z * slide;
+
+    const { nx, nz, nvx, nvz, hit } = resolveWallCollision(
+      newX, newZ, vx, vz, velocity.current
+    );
+
+    if (hit) {
+      newX = nx;
+      newZ = nz;
+      // Dampen speed on wall hit
+      velocity.current *= WALL_BOUNCE;
+    }
+
+    // ── Apply position (Y selalu = CAR_Y) ─────────────────────────────────
     bodyRef.current.setNextKinematicTranslation({ x: newX, y: CAR_Y, z: newZ });
 
     // ── Apply rotation ─────────────────────────────────────────────────────
@@ -171,7 +256,7 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     });
 
     // ── Wheel visuals ──────────────────────────────────────────────────────
-    const spin  = velocity.current * dt * 3.5;
+    const spin   = velocity.current * dt * 3.5;
     const steerV = steer.current * 10;
     if (wheelFLRef.current) {
       wheelFLRef.current.children[0].rotation.x += spin;
@@ -186,8 +271,6 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
 
     // ── Telemetry ──────────────────────────────────────────────────────────
     setTelemetry(Math.abs(velocity.current) * 3.6, steer.current);
-
-    // ── Lap timer ──────────────────────────────────────────────────────────
     lapTimer.current += dt;
     setLapTime(lapTimer.current);
 
