@@ -157,7 +157,6 @@ export default function ArcadeCar({ controls, carConfig }: Props) {
     positionLerpSpeed: 7,
     lookAtLerpSpeed: 10,
     fovLerpSpeed: 4,
-    maxRoll: 0.04,
   });
 
   const resetCar = () => {
